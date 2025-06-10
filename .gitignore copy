@@ -1,0 +1,6 @@
+# React deps & build
+react-client/node_modules/
+react-client/node_modules/.cache/
+
+# Python venv
+python-server/.venv/

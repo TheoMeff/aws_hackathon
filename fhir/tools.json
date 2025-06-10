@@ -1,0 +1,318 @@
+{
+    "tools": [
+      {
+        "toolSpec": {
+          "name": "searchByType",
+          "description": "Return every FHIR resource of a given type (Patient, Observation, Encounter …).",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "resource_type": {
+                  "type": "string",
+                  "description": "FHIR resource type to search for (case-sensitive)."
+                }
+              },
+              "required": ["resource_type"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "searchById",
+          "description": "Fetch a specific FHIR resource when you already know its id.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "resource_id": {
+                  "type": "string",
+                  "description": "The logical id of the resource."
+                }
+              },
+              "required": ["resource_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "searchByText",
+          "description": "Full-text search across all stored FHIR JSON blobs.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "Free-text search expression."
+                }
+              },
+              "required": ["query"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "findPatient",
+          "description": "Locate patients by name, birth-date or any demographic identifier.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "Name fragment, DOB (YYYY-MM-DD) or MRN to match."
+                }
+              },
+              "required": ["query"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getPatientObservations",
+          "description": "Return raw Observation resources (vitals & labs) for a patient id.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "FHIR logical id of the Patient resource."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getPatientConditions",
+          "description": "List active Condition resources for the selected patient.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getPatientMedications",
+          "description": "List current MedicationStatement / MedicationRequest items for the patient.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getPatientEncounters",
+          "description": "Return Encounter records (visits, admissions) for the patient.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getPatientAllergies",
+          "description": "Retrieve AllergyIntolerance resources for the patient.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getPatientProcedures",
+          "description": "Return Procedure resources for the patient.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getPatientCareTeam",
+          "description": "List CareTeam participants assigned to the patient.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getPatientCarePlans",
+          "description": "Fetch active CarePlan resources for the patient.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getVitalSigns",
+          "description": "Convenience wrapper that filters Observations to classic vitals (BP, HR, RR, Temp, O2Sat, Height, Weight, BMI).",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getLabResults",
+          "description": "Return only Observation resources categorised as laboratory results for the patient.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "getMedicationsHistory",
+          "description": "Retrieve historic MedicationRequest / MedicationStatement items for the patient.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "patient_id": {
+                  "type": "string",
+                  "description": "Patient id."
+                }
+              },
+              "required": ["patient_id"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "executeClinicalQuery",
+          "description": "Run any raw FHIR search expression (e.g. `Condition?patient=12345&status=active`).",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "Valid FHIR search URL or parameters."
+                }
+              },
+              "required": ["query"]
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "listResourceTypes",
+          "description": "Return an array of distinct FHIR resource types available in the database.",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {},
+              "required": []
+            })
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "listAllResources",
+          "description": "Return every stored FHIR resource (use carefully!).",
+          "inputSchema": {
+            "json": JSON.stringify({
+              "type": "object",
+              "properties": {},
+              "required": []
+            })
+          }
+        }
+      }
+    ]
+  }

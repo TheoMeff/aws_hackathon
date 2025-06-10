@@ -1,0 +1,12 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "FHIR",
+    "fhir"
+  ],
+  "ignorePaths": [
+    "react-client/**/node_modules/**",
+    "python-server/**/__pycache__/**"
+  ]
+}
