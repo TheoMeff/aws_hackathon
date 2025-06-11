@@ -1,6 +1,6 @@
 import asyncio
 import json
-#import base64  (unused)
+import re
 import warnings
 import uuid
 from s2s_events import S2sEvent
@@ -10,6 +10,7 @@ from aws_sdk_bedrock_runtime.models import InvokeModelWithBidirectionalStreamInp
 from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
 from smithy_aws_core.credentials_resolvers.environment import EnvironmentCredentialsResolver
 from integration import inline_agent, bedrock_knowledge_bases as kb
+from integration.fhir_mcp_client import FhirMcpClient
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -32,15 +33,29 @@ def debug_print(message):
     if DEBUG:
         print(message)
 
+def camel_to_snake(name):
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
 
 class S2sSessionManager:
     """Manages bidirectional streaming with AWS Bedrock using asyncio"""
     
-    def __init__(self, model_id='amazon.nova-sonic-v1:0', region='us-east-1', mcp_client=None, strands_agent=None):
+    def __init__(self, model_id='amazon.nova-sonic-v1:0', region='us-east-1', mcp_loc_client=None, strands_agent=None, fhir_agent=None, mimic_fhir_agent=None):
         """Initialize the stream manager."""
         self.model_id = model_id
         self.region = region
         
+        # Client setup
+        if mimic_fhir_agent:
+            self.mcp_loc_client = mimic_fhir_agent.client
+        elif fhir_agent:
+            self.mcp_loc_client = fhir_agent.client
+        else:
+            self.mcp_loc_client = mcp_loc_client
+        
+        print(f"SessionManager initialized with client: {type(self.mcp_loc_client)}")
+
+        self.strands_agent = strands_agent
+
         # Audio and output queues
         self.audio_input_queue = asyncio.Queue()
         self.output_queue = asyncio.Queue()
@@ -51,14 +66,12 @@ class S2sSessionManager:
         self.bedrock_client = None
         
         # Session information
-        self.prompt_name = None  # Will be set from frontend
-        self.content_name = None  # Will be set from frontend
-        self.audio_content_name = None  # Will be set from frontend
+        self.prompt_name = None
+        self.content_name = None
+        self.audio_content_name = None
         self.toolUseContent = ""
         self.toolUseId = ""
         self.toolName = ""
-        self.mcp_loc_client = mcp_client
-        self.strands_agent = strands_agent
 
     def _initialize_client(self):
         """Initialize the Bedrock client."""
@@ -72,7 +85,11 @@ class S2sSessionManager:
         self.bedrock_client = BedrockRuntimeClient(config=config)
 
     async def initialize_stream(self):
-        """Initialize the bidirectional stream with Bedrock."""
+        # Skip any Bedrock CRT streaming when running with pure FHIR MCP client
+        if hasattr(self, 'mcp_loc_client') and isinstance(self.mcp_loc_client, FhirMcpClient) and self.strands_agent is None:
+            self.is_active = False
+            return self
+
         try:
             if not self.bedrock_client:
                 self._initialize_client()
@@ -242,7 +259,8 @@ class S2sSessionManager:
         """Return the tool result"""
         print(f"Tool Use Content: {toolUseContent}")
 
-        toolName = toolName.lower()
+        toolName = camel_to_snake(toolName)
+        print(f"Normalized tool name: {toolName}")
         content, result = None, None
         try:
             if toolUseContent.get("content"):

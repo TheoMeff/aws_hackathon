@@ -7,22 +7,11 @@ from strands import Agent, tool
 from strands.models import BedrockModel
 from integration.fhir_mcp_client import FhirMcpClient
 
-# Shared FHIR client instance
-tmp_fhir_client = None
-
-@tool
-def fhirTool(tool_name: str, parameters: str) -> str:
-    """FHIR search tool: invoke FHIRSearch methods via FhirMcpClient."""
-    data = json.loads(parameters)
-    result = asyncio.run(tmp_fhir_client.call_tool({"tool": tool_name, "parameters": data}))
-    return json.dumps(result)
-
 class FhirAgent:
     """Agent that uses strands.Agent to reason over FHIR queries and invoke fhirTool."""
     def __init__(self):
-        global tmp_fhir_client
         db_path = os.getenv("FHIR_DB_PATH", "fhir_data.db")
-        tmp_fhir_client = FhirMcpClient(db_path=db_path)
+        self.client = FhirMcpClient(db_path=db_path)
 
         session = boto3.Session(region_name=os.getenv("AWS_REGION", "us-east-1"))
         bedrock_model = BedrockModel(
@@ -30,12 +19,21 @@ class FhirAgent:
             boto_session=session
         )
 
-        tools = [fhirTool]
+        tools = [self.fhirTool]
         system_prompt = (
             "You are a FHIR data assistant. "
             "Use fhirTool(tool_name, parameters) to query the FHIR data store."
         )
         self.agent = Agent(tools=tools, model=bedrock_model, system_prompt=system_prompt)
+
+    @tool
+    def fhirTool(self, tool_name: str, parameters: str) -> str:
+        """FHIR search tool: invoke FHIRSearch methods via FhirMcpClient."""
+        print("fhirTool:", tool_name, parameters)
+        data = json.loads(parameters)
+        result = asyncio.run(self.client.call_tool({"tool": tool_name, "parameters": data}))
+        print("fhirTool result:", result)
+        return json.dumps(result)
 
     def query(self, input: str) -> str:
         """Send input to the agent for reasoning and tool invocation."""
@@ -45,8 +43,10 @@ class FhirAgent:
 
     def call_tool(self, tool_name: str, parameters: dict) -> str:
         """Directly invoke the fhirTool."""
-        return fhirTool(tool_name, json.dumps(parameters))
+        print("call_tool:", tool_name, parameters)
+        return self.fhirTool(tool_name, json.dumps(parameters))
 
     def close(self):
-        """Cleanup the FHIR client."""
-        tmp_fhir_client.cleanup()
+        """Close the FHIR client."""
+        if self.client:
+            self.client.close()

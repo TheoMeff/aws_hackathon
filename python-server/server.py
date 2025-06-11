@@ -13,6 +13,7 @@ from integration.mcp_client import McpLocationClient
 from integration.strands_agent import StrandsAgent
 from integration.fhir_mcp_client import FhirMcpClient  # FHIR MCP agent
 from integration.fhir_agent import FhirAgent  # FHIR conversational agent
+from integration.mimic_fhir_agent import MimicFhirAgent  # MIMIC FHIR conversational agent
 
 # Configure logging
 LOGLEVEL = os.environ.get("LOGLEVEL", "INFO").upper()
@@ -31,6 +32,8 @@ def debug_print(message):
 
 MCP_CLIENT = None
 STRANDS_AGENT = None
+FHIR_AGENT = None
+MIMIC_FHIR_AGENT = None
 
 class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -107,11 +110,11 @@ async def websocket_handler(websocket):
                 if 'body' in data:
                     data = json.loads(data["body"])
                 if 'event' in data:
-                    if stream_manager == None:
+                    if stream_manager is None:
 
                         """Handle WebSocket connections from the frontend."""
                         # Create a new stream manager for this connection
-                        stream_manager = S2sSessionManager(model_id='amazon.nova-sonic-v1:0', region='us-east-1', mcp_client=MCP_CLIENT, strands_agent=STRANDS_AGENT)
+                        stream_manager = S2sSessionManager(model_id='amazon.nova-sonic-v1:0', region='us-east-1', mcp_loc_client=MCP_CLIENT, strands_agent=STRANDS_AGENT, fhir_agent=FHIR_AGENT, mimic_fhir_agent=MIMIC_FHIR_AGENT)
                         
                         # Initialize the Bedrock stream
                         await stream_manager.initialize_stream()
@@ -186,9 +189,9 @@ async def forward_responses(websocket, stream_manager):
         stream_manager.close()
 
 
-async def main(host, port, health_port, enable_mcp=False, enable_strands_agent=False, enable_mcp_fhir=False, enable_fhir=False):
+async def main(host, port, health_port, enable_mcp=False, enable_strands_agent=False, enable_mcp_fhir=False, enable_fhir=False, enable_mimic_fhir=False):
     # allow assigning to module-level client variables
-    global MCP_CLIENT, STRANDS_AGENT
+    global MCP_CLIENT, STRANDS_AGENT, FHIR_AGENT, MIMIC_FHIR_AGENT
     if health_port:
         try:
             start_health_check_server(host, health_port)
@@ -212,7 +215,13 @@ async def main(host, port, health_port, enable_mcp=False, enable_strands_agent=F
             print("Failed to start MCP client",ex)
     if enable_fhir:
         print("FHIR agent enabled")
-        STRANDS_AGENT = FhirAgent()
+        FHIR_AGENT = FhirAgent()
+        STRANDS_AGENT = FHIR_AGENT
+    if enable_mimic_fhir:
+        print("MIMIC FHIR agent enabled")
+        mimic_fhir_agent = MimicFhirAgent()
+        MIMIC_FHIR_AGENT = mimic_fhir_agent
+        STRANDS_AGENT = mimic_fhir_agent
 
     """Main function to run the WebSocket server."""
     try:
@@ -243,6 +252,7 @@ if __name__ == "__main__":
     enable_strands = args.agent == "strands"
     enable_mcp_fhir = args.agent == "mcp_fhir"
     enable_fhir = args.agent == "fhir"
+    enable_mimic_fhir = args.agent == "mimic_fhir"
 
     aws_key_id = os.getenv("AWS_ACCESS_KEY_ID")
     aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -253,7 +263,7 @@ if __name__ == "__main__":
         print(f"AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required.")
     else:
         try:
-            asyncio.run(main(host, port, health_port, enable_mcp, enable_strands, enable_mcp_fhir, enable_fhir))
+            asyncio.run(main(host, port, health_port, enable_mcp, enable_strands, enable_mcp_fhir, enable_fhir, enable_mimic_fhir))
         except KeyboardInterrupt:
             print("Server stopped by user")
         except Exception as e:
