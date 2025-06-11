@@ -9,10 +9,7 @@ import http.server
 import threading
 import os
 from http import HTTPStatus
-from integration.mcp_client import McpLocationClient
-from integration.strands_agent import StrandsAgent
 from integration.fhir_mcp_client import FhirMcpClient  # FHIR MCP agent
-from integration.fhir_agent import FhirAgent  # FHIR conversational agent
 from integration.mimic_fhir_agent import MimicFhirAgent  # MIMIC FHIR conversational agent
 
 # Configure logging
@@ -199,29 +196,14 @@ async def main(host, port, health_port, enable_mcp=False, enable_strands_agent=F
             print("Failed to start health check endpoint",ex)
     
     # Init MCP clients
-    if enable_mcp:
-        print("MCP enabled")
-        MCP_CLIENT = McpLocationClient()
-        await MCP_CLIENT.connect_to_server()
     if enable_mcp_fhir:
         print("FHIR MCP enabled")
         MCP_CLIENT = FhirMcpClient()
         await MCP_CLIENT.connect_to_server()
-    if enable_strands_agent:
-        print("STRANDS agent enabled")
-        try:
-            STRANDS_AGENT = StrandsAgent()
-        except Exception as ex:
-            print("Failed to start MCP client",ex)
-    if enable_fhir:
-        print("FHIR agent enabled")
-        FHIR_AGENT = FhirAgent()
-        STRANDS_AGENT = FHIR_AGENT
     if enable_mimic_fhir:
         print("MIMIC FHIR agent enabled")
         mimic_fhir_agent = MimicFhirAgent()
         MIMIC_FHIR_AGENT = mimic_fhir_agent
-        STRANDS_AGENT = mimic_fhir_agent
 
     """Main function to run the WebSocket server."""
     try:

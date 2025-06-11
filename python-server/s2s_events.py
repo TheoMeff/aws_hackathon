@@ -1,4 +1,5 @@
 import json
+import time
 
 class S2sEvent:
   # Default configuration values
@@ -628,6 +629,85 @@ class S2sEvent:
                   }
               }
           }
+      ,
+          {
+              "toolSpec": {
+                  "name": "getPatientDashboard",
+                  "description": "Generate comprehensive patient dashboard with visualizations including vital signs, lab results, medications, and clinical timeline.",
+                  "inputSchema": {
+                      "json": '''{
+                          "$schema": "http://json-schema.org/draft-07/schema#",
+                          "type": "object",
+                          "properties": {
+                              "patient_id": {
+                                  "type": "string",
+                                  "description": "MIMIC patient FHIR ID or identifier"
+                              },
+                              "include_voice_summary": {
+                                  "type": "boolean",
+                                  "description": "Include voice-friendly summary",
+                                  "default": true
+                              }
+                          },
+                          "required": ["patient_id"]
+                      }'''
+                  }
+              }
+          },
+          {
+              "toolSpec": {
+                  "name": "analyzePatientTrends",
+                  "description": "Analyze patient clinical trends over time including vital signs patterns, medication changes, and condition progression.",
+                  "inputSchema": {
+                      "json": '''{
+                          "$schema": "http://json-schema.org/draft-07/schema#",
+                          "type": "object",
+                          "properties": {
+                              "patient_id": {
+                                  "type": "string",
+                                  "description": "MIMIC patient FHIR ID or identifier"
+                              },
+                              "analysis_type": {
+                                  "type": "string",
+                                  "description": "Type of analysis to perform",
+                                  "enum": ["vital_trends", "lab_trends", "medication_timeline", "condition_progression", "comprehensive"]
+                              },
+                              "time_period": {
+                                  "type": "string",
+                                  "description": "Time period for analysis",
+                                  "enum": ["last_week", "last_month", "last_year", "all_time"]
+                              }
+                          },
+                          "required": ["patient_id"]
+                      }'''
+                  }
+              }
+          },
+          {
+              "toolSpec": {
+                  "name": "comparePatients",
+                  "description": "Compare clinical data between multiple MIMIC patients for research or clinical decision support.",
+                  "inputSchema": {
+                      "json": '''{
+                          "$schema": "http://json-schema.org/draft-07/schema#",
+                          "type": "object",
+                          "properties": {
+                              "patient_ids": {
+                                  "type": "array",
+                                  "items": {"type": "string"},
+                                  "description": "List of patient IDs to compare"
+                              },
+                              "comparison_criteria": {
+                                  "type": "array",
+                                  "items": {"type": "string"},
+                                  "description": "Criteria to compare (demographics, conditions, medications, outcomes)"
+                              }
+                          },
+                          "required": ["patient_ids"]
+                      }'''
+                  }
+              }
+          }
       ]
   }
     
@@ -685,11 +765,11 @@ class S2sEvent:
               "toolSpec": {
                   "name": "lookup",
                   "description": "Runs query against a knowledge base to retrieve information.",
-        "inputSchema": {
-          "json": "{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"the query to search\"}},\"required\":[\"query\"]}"
-        }
-      }
-    },
+                  "inputSchema": {
+                      "json": "{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"the query to search\"}},\"required\":[\"query\"]}"
+                  }
+              }
+          },
           {
               "toolSpec": {
                   "name": "locationMcpTool",
@@ -817,6 +897,35 @@ class S2sEvent:
                           "mediaType": "text/plain"
                       }
                   }
+              }
+          }
+      }
+
+  @staticmethod
+  def patient_dashboard_request(prompt_name, content_name, patient_id=None):
+      """Request patient dashboard visualization"""
+      return {
+          "event": {
+              "customEvent": {
+                  "promptName": prompt_name,
+                  "contentName": content_name,
+                  "eventType": "patient_dashboard",
+                  "patientId": patient_id,
+                  "timestamp": int(time.time() * 1000)
+              }
+          }
+      }
+  
+  @staticmethod
+  def patient_summary_request(prompt_name, content_name, patient_id):
+      """Request patient summary for voice"""
+      return {
+          "event": {
+              "patientSummary": {
+                  "promptName": prompt_name,
+                  "contentName": content_name,
+                  "patientId": patient_id,
+                  "includeVoiceSummary": True
               }
           }
       }

@@ -1,0 +1,83 @@
+/* Patient Data View Styling */
+.patient-data {
+    width: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.patient-section {
+    margin-bottom: 20px;
+    border-bottom: 1px solid #eaeaea;
+    padding-bottom: 15px;
+}
+
+.patient-section h3 {
+    font-size: 16px;
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+.patient-info {
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+.patient-info p {
+    margin: 5px 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.patient-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.patient-item {
+    background-color: #f8f9fa;
+    border-left: 3px solid #0073bb;
+    padding: 10px 12px;
+    border-radius: 4px;
+}
+
+.patient-item p {
+    margin: 3px 0;
+    font-size: 14px;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    margin-left: 5px;
+}
+
+.status-active {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-completed {
+    background-color: #cce5ff;
+    color: #004085;
+}
+
+.status-unknown {
+    background-color: #e2e3e5;
+    color: #383d41;
+}
+
+/* Empty state */
+.placeholder {
+    color: #6c757d;
+    text-align: center;
+    padding: 30px;
+    font-style: italic;
+}
