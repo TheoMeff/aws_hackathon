@@ -1081,6 +1081,11 @@ class MimicPatient:
                 "is_deceased": self.demographics.is_deceased,
                 "age": self._calculate_age()
             },
+            "encounters": self.clinical_data.encounters,
+            "medications": self.clinical_data.medications,
+            "lab_results": self.clinical_data.lab_results,
+            "observations": self.clinical_data.observations,
+            "conditions": self.clinical_data.conditions,
             "clinical_summary": self.get_summary_statistics(),
             "data_counts": {
                 "observations": len(self.clinical_data.observations),

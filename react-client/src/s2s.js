@@ -62,6 +62,7 @@ class S2sChatBot extends React.Component {
                 encounters: [],
                 medications: [],
                 observations: [],
+                lab_results: [],
                 conditions: []
             },
 
@@ -566,6 +567,12 @@ class S2sChatBot extends React.Component {
             console.log(`Loaded ${result.length} observations`);
         }
         
+        // Process lab results
+        if (Array.isArray(result) && result.length > 0 && result[0].resourceType === "Observation" && result[0].category.coding[0].code === "laboratory") {
+            patientData.lab_results = result;
+            console.log(`Loaded ${result.length} lab results`);
+        }
+        
         // Process conditions
         if (Array.isArray(result) && result.length > 0 && result[0].resourceType === "Condition") {
             patientData.conditions = result;
@@ -610,7 +617,7 @@ class S2sChatBot extends React.Component {
     renderPatientData() {
         const { patientData } = this.state;
         const demographics = (patientData.demographics && typeof patientData.demographics === 'object') ? patientData.demographics : {};
-        const { clinical_summary = {}, data_counts = {}, encounters = [], medications = [], observations = [], conditions = [] } = patientData;
+        const { clinical_summary = {}, data_counts = {}, encounters = [], medications = [], lab_results = [], observations = [], conditions = [] } = patientData;
 
         if (Object.keys(demographics).length === 0) {
             return (
@@ -668,6 +675,13 @@ class S2sChatBot extends React.Component {
                         </div>
                     </div>
                 )}
+                {/* Lab Results */}
+                {lab_results.length > 0 && (
+                    <div className="patient-section">
+                        <h3>Recent Lab Results ({lab_results.length})</h3>
+                        {this.renderLabResults(lab_results)}
+                    </div>
+                )}
                 {/* Conditions */}
                 {conditions.length > 0 && (
                     <div className="patient-section">
@@ -703,6 +717,70 @@ class S2sChatBot extends React.Component {
                     </div>
                 )}
             </div>
+        );
+    }
+
+    // Render lab results table with spectrum bars
+    renderLabResults(labs = []) {
+        // Sort by date descending
+        const sorted = [...labs].sort((a, b) => {
+            const da = new Date(a.effective_date || a.issued_date || 0);
+            const db = new Date(b.effective_date || b.issued_date || 0);
+            return db - da;
+        });
+
+        // Show latest 10 results
+        const display = sorted.slice(0, 10);
+
+        return (
+            <table className="lab-table">
+                <thead>
+                    <tr>
+                        <th>Stat</th>
+                        <th>Value</th>
+                        <th>Range</th>
+                        <th>Spectrum</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {display.map((lab) => {
+                        const value = lab.value_numeric ?? lab.value_quantity?.value;
+                        const unit = lab.unit ?? lab.value_quantity?.unit;
+                        const ref = (lab.reference_range && lab.reference_range[0]) || {};
+                        const low = ref.low?.value;
+                        const high = ref.high?.value;
+                        let pct = null;
+                        if (low !== undefined && high !== undefined && value !== undefined) {
+                            const span = high - low;
+                            pct = span ? ((value - low) / span) * 100 : null;
+                            pct = Math.min(100, Math.max(0, pct));
+                        }
+
+                        return (
+                            <tr key={lab.id || Math.random()}>
+                                <td>{lab.code_display || lab.code?.coding?.[0]?.display}</td>
+                                <td>
+                                    {value} {unit}
+                                    {lab.status === "abnormal" && (
+                                        <span style={{ color: "#d9534f", marginLeft: 4 }}>⚠︎</span>
+                                    )}
+                                </td>
+                                <td>{low !== undefined && high !== undefined ? `${low} – ${high}` : ""}</td>
+                                <td style={{ width: 120 }}>
+                                    <div className="spectrum-bar">
+                                        {pct !== null && (
+                                            <div
+                                                className="spectrum-arrow"
+                                                style={{ left: `calc(${pct}% - 4px)` }}
+                                            />
+                                        )}
+                                    </div>
+                                </td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
         );
     }
     

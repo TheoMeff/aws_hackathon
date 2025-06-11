@@ -36,12 +36,19 @@ warnings.filterwarnings("ignore")
 FHIR_TOOL_NAMES = [
     "search_by_type", "search_by_id", "search_by_text",
     "find_patient", "get_patient_observations", "get_patient_conditions",
-    "get_patient_medications", "get_patient_encounters", "get_patient_allergies",
+    "get_patient_medications", "get_patient_medication", "get_patient_encounters", "get_patient_allergies",
     "get_patient_procedures", "get_patient_careteam", "get_patient_careplans",
     "get_vital_signs", "get_lab_results", "get_medications_history",
     "clinical_query", "get_resource_by_type_and_id", "get_all_resources",
     "get_resource_types", "get_patient_data",
 ]
+
+# Bedrock imposes size limits on individual event payloads (~32KB). We stay well
+# under that to avoid ValidationException errors when sending large tool
+# results (e.g. 100+ lab Observations). Content larger than this threshold will
+# be summarised before being sent back to Bedrock; the full data remains in the
+# cached patient object and is available via get_patient_data.
+MAX_TOOL_EVENT_CHARS = 15000  # conservative safety limit
 
 DEBUG = False
 
@@ -228,11 +235,17 @@ class S2sSessionManager:
             try:            
                 # Add timeout to prevent hanging indefinitely waiting for events
                 try:
-                    output = await asyncio.wait_for(self.stream.await_output(), timeout=30.0)
-                    result = await asyncio.wait_for(output[1].receive(), timeout=10.0)
+                    output = await asyncio.wait_for(self.stream.await_output(), timeout=60.0)
                 except asyncio.TimeoutError:
                     logger.warning("Timeout waiting for stream output, processing next event")
-                    # Send a heartbeat event to keep the connection alive
+                    await self.send_heartbeat()
+                    continue
+
+                # Shield the receive coroutine so a timeout doesn't cancel the underlying future
+                try:
+                    result = await asyncio.wait_for(asyncio.shield(output[1].receive()), timeout=60.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Timeout waiting for stream output, processing next event")
                     await self.send_heartbeat()
                     continue
                 
@@ -279,6 +292,23 @@ class S2sSessionManager:
                         else:
                             content_json_string = toolResult
 
+                        # Truncate overly large payloads to avoid Bedrock
+                        # ValidationException ("Invalid input request").
+                        if len(content_json_string) > MAX_TOOL_EVENT_CHARS:
+                            if isinstance(toolResult, dict) and "result" in toolResult:
+                                res_obj = toolResult["result"]
+                                item_count = len(res_obj) if isinstance(res_obj, list) else 1
+                            else:
+                                item_count = "unknown"
+
+                            summary_obj = {
+                                "status": "success",
+                                "total_items": item_count,
+                                "note": "Result truncated to avoid size limit. "
+                                        "Use get_patient_data to retrieve full details."
+                            }
+                            content_json_string = json.dumps(summary_obj)
+
                         tool_result_event = S2sEvent.text_input_tool(prompt_name, toolContent, content_json_string)
                         print("Tool result", tool_result_event)
                         await self.send_raw_event(tool_result_event)
@@ -310,7 +340,11 @@ class S2sSessionManager:
                     print(f"Validation error: {error_message}")
                 else:
                     print(f"Error receiving response: {e}")
-                break
+                try:
+                    await self.send_heartbeat()
+                except Exception as hb_err:
+                    logger.error(f"Failed to send heartbeat after error: {hb_err}")
+                continue
 
         self.is_active = False
         self.close()
@@ -350,8 +384,26 @@ class S2sSessionManager:
                     
                     # Parse FHIR data into patient object
                     if result:
-                        # Special handling for find_patient which returns a list directly
-                        if toolName == "find_patient" and isinstance(result, list) and len(result) > 0:
+                        # If tool directly returns a list of FHIR resources (common for *_list tools)
+                        if isinstance(result, list):
+                            for resource in result:
+                                resource_type = resource.get("resourceType")
+                                if resource_type == "Patient":
+                                    self.patient.parse_patient_resource(resource)
+                                elif resource_type == "Observation":
+                                    self.patient.parse_observation_resource(resource)
+                                elif resource_type == "Condition":
+                                    self.patient.parse_condition_resource(resource)
+                                elif resource_type == "MedicationRequest":
+                                    self.patient.parse_medication_request(resource)
+                                elif resource_type == "Encounter":
+                                    self.patient.parse_encounter_resource(resource)
+
+                            # For list-returning tools wrap in dict so downstream has consistent structure
+                            result_dict = {"result": result}
+
+                        # Special handling for find_patient which returns a list directly and we processed above
+                        elif toolName == "find_patient" and isinstance(result, list) and len(result) > 0:
                             # Directly use the first patient in the list
                             patient_resource = result[0]
                             logger.info(f"Processing patient resource from find_patient: {patient_resource.get('id')}")
@@ -362,10 +414,15 @@ class S2sSessionManager:
                         else:
                             # Convert result to dict if it's a JSON string
                             if isinstance(result, str):
-                                try:
-                                    result_dict = json.loads(result)
-                                except json.JSONDecodeError:
-                                    result_dict = {"result": result}
+                                # Treat JSON 'null' or 'None' strings as no data
+                                if result.strip().lower() in ("null", "none", ""):
+                                    result = None
+                                    result_dict = {"result": []}
+                                else:
+                                    try:
+                                        result_dict = json.loads(result)
+                                    except json.JSONDecodeError:
+                                        result_dict = {"result": result}
                             else:
                                 result_dict = result
                             
@@ -386,6 +443,11 @@ class S2sSessionManager:
                                         self.patient.parse_medication_request(resource)
                                     elif resource_type == "Encounter":
                                         self.patient.parse_encounter_resource(resource)
+                            
+                            # Handle case where result key is None (no data)
+                            elif "result" in result_dict and result_dict["result"] is None:
+                                result_dict["result"] = []  # Normalise to empty list
+                                result = []
                             
                             # Also handle direct resources or bundles (not in a result array)
                             elif "resourceType" in result_dict:
@@ -418,6 +480,10 @@ class S2sSessionManager:
                             "_synthetic": True
                         }]
                         return {"result": synthetic_result, "patientData": patient_data}
+                # If result still None after processing, return empty list so frontend doesn't break
+                if toolName in FHIR_TOOL_NAMES and result is None:
+                    patient_data = self.patient.to_dict()
+                    return {"result": [], "patientData": patient_data}
                 return {"result": result, "patientData": patient_data}
             else:
                 return {"result": result}
