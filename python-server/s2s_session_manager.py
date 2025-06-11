@@ -40,7 +40,7 @@ FHIR_TOOL_NAMES = [
     "get_patient_procedures", "get_patient_careteam", "get_patient_careplans",
     "get_vital_signs", "get_lab_results", "get_medications_history",
     "clinical_query", "get_resource_by_type_and_id", "get_all_resources",
-    "get_resource_types",
+    "get_resource_types", "get_patient_data",
 ]
 
 DEBUG = False
@@ -236,52 +236,65 @@ class S2sSessionManager:
                     await self.send_heartbeat()
                     continue
                 
-                if result.value and result.value.bytes_:
-                    response_data = result.value.bytes_.decode('utf-8')
+                # Gracefully skip empty chunks
+                if not result or not getattr(result, "value", None):
+                    logger.debug("Received empty result chunk, skipping")
+                    continue
+                if not getattr(result.value, "bytes_", None):
+                    logger.debug("Result chunk has no bytes, skipping")
+                    continue
+                
+                response_data = result.value.bytes_.decode('utf-8')
+                
+                json_data = json.loads(response_data)
+                json_data["timestamp"] = int(time.time() * 1000)  # Milliseconds since epoch
+                
+                event_name = None
+                if 'event' in json_data:
+                    event_name = list(json_data["event"].keys())[0]
+                    # if event_name == "audioOutput":
+                    #     print(json_data)
                     
-                    json_data = json.loads(response_data)
-                    json_data["timestamp"] = int(time.time() * 1000)  # Milliseconds since epoch
-                    
-                    event_name = None
-                    if 'event' in json_data:
-                        event_name = list(json_data["event"].keys())[0]
-                        # if event_name == "audioOutput":
-                        #     print(json_data)
-                        
-                        # Handle tool use detection
-                        if event_name == 'toolUse':
-                            self.toolUseContent = json_data['event']['toolUse']
-                            self.toolName = json_data['event']['toolUse']['toolName']
-                            self.toolUseId = json_data['event']['toolUse']['toolUseId']
-                            debug_print(f"Tool use detected: {self.toolName}, ID: {self.toolUseId}, "+ json.dumps(json_data['event']))
+                    # Handle tool use detection
+                    if event_name == 'toolUse':
+                        self.toolUseContent = json_data['event']['toolUse']
+                        self.toolName = json_data['event']['toolUse']['toolName']
+                        self.toolUseId = json_data['event']['toolUse']['toolUseId']
+                        debug_print(f"Tool use detected: {self.toolName}, ID: {self.toolUseId}, "+ json.dumps(json_data['event']))
 
-                        # Process tool use when content ends
-                        elif event_name == 'contentEnd' and json_data['event'][event_name].get('type') == 'TOOL':
-                            prompt_name = json_data['event']['contentEnd'].get("promptName")
-                            debug_print("Processing tool use and sending result")
-                            toolResult = await self.processToolUse(self.toolName, self.toolUseContent)
-                                
-                            # Send tool start event
-                            toolContent = str(uuid.uuid4())
-                            tool_start_event = S2sEvent.content_start_tool(prompt_name, toolContent, self.toolUseId)
-                            await self.send_raw_event(tool_start_event)
+                    # Process tool use when content ends
+                    elif event_name == 'contentEnd' and json_data['event'][event_name].get('type') == 'TOOL':
+                        prompt_name = json_data['event']['contentEnd'].get("promptName")
+                        debug_print("Processing tool use and sending result")
+                        toolResult = await self.processToolUse(self.toolName, self.toolUseContent)
                             
-                            # Send tool result event
-                            if isinstance(toolResult, dict):
-                                content_json_string = json.dumps(toolResult)
-                            else:
-                                content_json_string = toolResult
+                        # Send tool start event
+                        toolContent = str(uuid.uuid4())
+                        tool_start_event = S2sEvent.content_start_tool(prompt_name, toolContent, self.toolUseId)
+                        await self.send_raw_event(tool_start_event)
+                        
+                        # Send tool result event
+                        if isinstance(toolResult, dict):
+                            content_json_string = json.dumps(toolResult)
+                        else:
+                            content_json_string = toolResult
 
-                            tool_result_event = S2sEvent.text_input_tool(prompt_name, toolContent, content_json_string)
-                            print("Tool result", tool_result_event)
-                            await self.send_raw_event(tool_result_event)
+                        tool_result_event = S2sEvent.text_input_tool(prompt_name, toolContent, content_json_string)
+                        print("Tool result", tool_result_event)
+                        await self.send_raw_event(tool_result_event)
 
-                            # Send tool content end event
-                            tool_content_end_event = S2sEvent.content_end(prompt_name, toolContent)
-                            await self.send_raw_event(tool_content_end_event)
+                        # Send tool content end event
+                        tool_content_end_event = S2sEvent.content_end(prompt_name, toolContent)
+                        await self.send_raw_event(tool_content_end_event)
+                        
+                        # Push generated tool events to frontend queue as well
+                        now_ms = lambda: int(time.time()*1000)
+                        for ev in (tool_start_event, tool_result_event, tool_content_end_event):
+                            ev_with_ts = {**ev, "timestamp": now_ms()}
+                            await self.output_queue.put(ev_with_ts)
                     
-                    # Put the response in the output queue for forwarding to the frontend
-                    await self.output_queue.put(json_data)
+                # Put the response in the output queue for forwarding to the frontend
+                await self.output_queue.put(json_data)
 
 
             except json.JSONDecodeError as ex:
@@ -324,6 +337,11 @@ class S2sSessionManager:
                 from datetime import datetime, timezone
                 result = datetime.now(timezone.utc).strftime('%A, %Y-%m-%d %H-%M-%S')
             
+            # Special shortcut: return cached aggregated patient data
+            if toolName == "get_patient_data":
+                patient_data = self.patient.to_dict()
+                return {"result": patient_data, "patientData": patient_data}
+
             # FHIR MCP integration - FHIRSearch methods
             if toolName in FHIR_TOOL_NAMES:
                 if self.mcp_loc_client:

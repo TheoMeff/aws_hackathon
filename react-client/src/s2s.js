@@ -536,7 +536,7 @@ class S2sChatBot extends React.Component {
         if (result && result.patientData) {
             this.setState((prev) => ({
                 patientData: deepMerge({ ...prev.patientData }, result.patientData),
-            }));
+            }), () => console.log('Aggregated patientData received', this.state.patientData));
             return;
         }
         // Legacy fallback handling for individual resource arrays/bundles
@@ -612,7 +612,7 @@ class S2sChatBot extends React.Component {
         const demographics = (patientData.demographics && typeof patientData.demographics === 'object') ? patientData.demographics : {};
         const { clinical_summary = {}, data_counts = {}, encounters = [], medications = [], observations = [], conditions = [] } = patientData;
 
-        if (!demographics.patient_id) {
+        if (Object.keys(demographics).length === 0) {
             return (
                 <div className="placeholder">
                     No patient data yet. Start with <em>"Find patient John Smith"</em>.
