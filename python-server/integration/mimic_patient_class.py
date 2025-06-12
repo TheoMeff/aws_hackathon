@@ -64,6 +64,8 @@ class MimicPatient:
         self.raw_resources = {}  # Store raw FHIR resources
         self.data_frames = {}    # Store pandas DataFrames
         self.analysis_cache = {} # Cache analysis results
+        # Scheduled follow-up appointments
+        self.follow_up_appointments: List[Dict[str, Any]] = []
         
         if patient_id:
             self.demographics.patient_id = patient_id
@@ -1095,7 +1097,8 @@ class MimicPatient:
                 "medications": len(self.clinical_data.medications),
                 "encounters": len(self.clinical_data.encounters),
                 "procedures": len(self.clinical_data.procedures)
-            }
+            },
+            "follow_up_appointments": self.follow_up_appointments
         }
     
     def get_voice_summary(self) -> str:
@@ -1158,3 +1161,23 @@ class MimicPatient:
     conditions={summary['data_counts']['conditions']},
     medications={summary['data_counts']['medications']}
 )"""
+    
+    # =============================================
+    # Follow-up Appointment Utilities
+    # =============================================
+    
+    def schedule_follow_up(self, scheduled_time: str, reason: str = "") -> None:
+        """Save a follow-up appointment for the patient.
+        
+        Args:
+            scheduled_time: ISO-8601 datetime string when appointment is scheduled.
+            reason: Optional human-readable reason.
+        """
+        appointment = {
+            "scheduled_time": scheduled_time,
+            "reason": reason,
+        }
+        self.follow_up_appointments.append(appointment)
+        logger.info(
+            "Scheduled follow-up for %s at %s", self.demographics.patient_id, scheduled_time
+        )

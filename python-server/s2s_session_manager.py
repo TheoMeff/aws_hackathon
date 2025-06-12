@@ -309,7 +309,7 @@ class S2sSessionManager:
                             }
                             content_json_string = json.dumps(summary_obj)
 
-                        tool_result_event = S2sEvent.text_input_tool(prompt_name, toolContent, content_json_string)
+                        tool_result_event = S2sEvent.text_input_tool(prompt_name, toolContent, self.toolUseId, content_json_string)
                         print("Tool result", tool_result_event)
                         await self.send_raw_event(tool_result_event)
 
@@ -366,16 +366,24 @@ class S2sSessionManager:
                 content = toolUseContent.get("content")  # Pass the JSON string directly to the agent
                 print(f"Extracted query: {content}")
             
-            # Simple toolUse to get system time in UTC
-            if toolName == "getdatetool":
-                from datetime import datetime, timezone
-                result = datetime.now(timezone.utc).strftime('%A, %Y-%m-%d %H-%M-%S')
-            
+            # Claude differential diagnosis
+            if toolName == "differential_diagnosis":
+                from integration.differential_diagnosis import generate_differential_diagnosis
+                symptoms = query_json.get("symptoms", "") if query_json else ""
+                patient_summary = self.patient.get_voice_summary() if hasattr(self.patient, "get_voice_summary") else ""
+                result_text = generate_differential_diagnosis(symptoms=symptoms, patient_summary=patient_summary)
+                return {"result": result_text}
+
             # Special shortcut: return cached aggregated patient data
             if toolName == "get_patient_data":
                 patient_data = self.patient.to_dict()
                 return {"result": patient_data, "patientData": patient_data}
 
+            # Simple toolUse to get system time in UTC
+            if toolName == "getdatetool":
+                from datetime import datetime, timezone
+                result = datetime.now(timezone.utc).strftime('%A, %Y-%m-%d %H-%M-%S')
+            
             # FHIR MCP integration - FHIRSearch methods
             if toolName in FHIR_TOOL_NAMES:
                 if self.mcp_loc_client:

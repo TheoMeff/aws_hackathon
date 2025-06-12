@@ -29,7 +29,7 @@
 }
 
 .s2s .chatarea {
-    display: inline-block;
+    display: block;
     width: 100%;
     margin: 1%;
     padding: 10px;
@@ -55,7 +55,7 @@
     float: left; 
     text-align: left; 
     background-color: #b1dafc; 
-    width: 40%; 
+    width: 90%; 
     padding: 10px 20px;
     border-radius: 20px;
     cursor: pointer;
@@ -65,7 +65,7 @@
     float: right; 
     text-align: left; 
     background-color: #bbdfbc; 
-    width: 40%; 
+    width: 90%; 
     padding: 10px 20px;
     border-radius: 20px;
     cursor: pointer;
@@ -176,4 +176,20 @@
 }
 .eventdetail {
     overflow: auto;
+}
+
+/* Main 3-column layout */
+.main-layout {
+    display: grid;
+    grid-template-columns: 420px 1fr 320px;
+    gap: 16px;
+}
+
+.main-layout .awsui_container {
+    height: 650px;
+    overflow: hidden;
+}
+
+.main-layout .chatarea {
+    height: calc(650px - 60px);
 }

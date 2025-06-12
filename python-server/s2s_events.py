@@ -931,14 +931,14 @@ class S2sEvent:
       }
   
   @staticmethod
-  def text_input_tool(prompt_name, content_name, content):
+  def text_input_tool(prompt_name, content_name, tool_use_id, content):
       return {
           "event": {
               "toolResult": {
                   "promptName": prompt_name,
                   "contentName": content_name,
+                  "toolUseId": tool_use_id,
                   "content": content,
-                  #"role": "TOOL"
               }
           }
       }

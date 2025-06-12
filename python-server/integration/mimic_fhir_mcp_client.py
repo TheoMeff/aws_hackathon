@@ -12,6 +12,7 @@ import requests
 from requests_aws4auth import AWS4Auth
 from botocore.exceptions import NoCredentialsError
 from integration.mimic_patient_class import MimicPatient
+from integration.differential_diagnosis import generate_differential_diagnosis
 
 logger = logging.getLogger(__name__)
 
@@ -519,6 +520,60 @@ class MimicFhirMcpClient:
             elif tool_name == 'get_lab_results':
                 params['category'] = 'laboratory'
                 return await self.get_patient_observations(**params)
+            elif tool_name == 'differential_diagnosis':
+                # Generate differential diagnosis using Claude Sonnet
+                patient_id = params.get('patient_id') if isinstance(params, dict) else None
+                symptoms = params.get('symptoms', '') if isinstance(params, dict) else ''
+
+                patient_summary = ""
+                if patient_id:
+                    try:
+                        patient_obj = await self.get_patient_object(patient_id)
+                        if patient_obj:
+                            patient_summary = patient_obj.get_voice_summary() or ""
+                    except Exception as exc:
+                        logger.error(f"Failed to retrieve patient object for differential diagnosis: {exc}")
+
+                try:
+                    result_text = generate_differential_diagnosis(
+                        symptoms=symptoms,
+                        patient_summary=patient_summary,
+                    )
+                    return {"result": result_text}
+                except Exception as exc:
+                    logger.exception("Bedrock differential diagnosis call failed")
+                    return {"error": str(exc)}
+            elif tool_name in ['schedule_follow_up', 'scheduleFollowUp']:
+                # Schedule a follow-up appointment for a patient
+                if not isinstance(params, dict):
+                    return {"error": "Parameters must be an object"}
+
+                patient_id = params.get("patient_id")
+                scheduled_time = params.get("scheduled_time")
+                reason = params.get("reason", "")
+
+                if not patient_id or not scheduled_time:
+                    return {"error": "'patient_id' and 'scheduled_time' are required"}
+
+                try:
+                    patient_obj = await self.get_patient_object(patient_id)
+                    if not patient_obj:
+                        patient_obj = MimicPatient(patient_id)
+
+                    patient_obj.schedule_follow_up(scheduled_time, reason)
+                    # Update cache
+                    self.patient_cache[patient_id] = patient_obj
+
+                    return {
+                        "result": {
+                            "patient_id": patient_id,
+                            "scheduled_time": scheduled_time,
+                            "reason": reason,
+                        }
+                    }
+                except Exception as exc:
+                    logger.exception("Failed to schedule follow-up")
+                    return {"error": str(exc)}
             else:
                 return {"error": f"Unknown MIMIC tool: {tool_name}"}
                 
