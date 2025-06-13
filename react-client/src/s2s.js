@@ -1,12 +1,22 @@
 import React from 'react';
 import './s2s.css';
-import './patient-data.css'
+import './patient-data.css';
+import './transcribe.css';
 import { Icon, Alert, Button, Modal, Box, SpaceBetween, Container, Header, FormField, Select, Textarea, Checkbox } from '@cloudscape-design/components';
 import S2sEvent from './helper/s2sEvents';
 import Meter from './components/meter';
 import S2sEventDisplay from './components/eventDisplay';
 import { base64ToFloat32Array } from './helper/audioHelper';
 import AudioPlayer from './helper/audioPlayer';
+// Temporarily use mock client for testing without AWS credentials
+// Change back to './helper/transcribeClient' when AWS is configured
+import {
+    startRecording,
+    stopRecording,
+    startMedicalRecording,
+    getMedicalSpecialties,
+    isMedicalTranscriptionAvailable
+} from './helper/transcribeClient.mock';
 
 // Deep merge utility for patientData
 function deepMerge(target = {}, source = {}) {
@@ -69,6 +79,13 @@ class S2sChatBot extends React.Component {
             // Differential diagnosis text from Claude
             differentialDiagnosis: "",
 
+            // Amazon Transcribe state
+            transcribeStarted: false,
+            transcribeText: "",
+            transcribeAlert: null,
+            transcribeMode: 'standard', // 'standard' or 'medical'
+            medicalSpecialty: 'PRIMARYCARE',
+
             // S2S config items
             configAudioInput: null,
             configSystemPrompt: S2sEvent.DEFAULT_SYSTEM_PROMPT,
@@ -80,7 +97,7 @@ class S2sChatBot extends React.Component {
         this.socket = null;
         this.mediaRecorder = null;
         this.chatMessagesEndRef = React.createRef();
-        this.stateRef = React.createRef();  
+        this.stateRef = React.createRef();
         this.eventDisplayRef = React.createRef();
         this.meterRef =React.createRef();
         this.audioPlayer = new AudioPlayer();
@@ -96,17 +113,21 @@ class S2sChatBot extends React.Component {
 
     componentWillUnmount() {
         this.audioPlayer.stop();
+        // Clean up Transcribe if running
+        if (this.state.transcribeStarted) {
+            stopRecording();
+        }
     }
 
 
     componentDidUpdate(prevProps, prevState) {
-        this.stateRef.current = this.state; 
+        this.stateRef.current = this.state;
 
         if (prevState.chatMessages.length !== this.state.chatMessages.length) {
             this.chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }
     }
-    
+
     sendEvent(event) {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
             this.socket.send(JSON.stringify(event));
@@ -115,7 +136,7 @@ class S2sChatBot extends React.Component {
             this.eventDisplayRef.current.displayEvent(event, "out");
         }
     }
-    
+
     cancelAudio() {
         this.audioPlayer.bargeIn();
         this.setState({ isPlaying: false });
@@ -123,7 +144,7 @@ class S2sChatBot extends React.Component {
 
     handleIncomingMessage (message) {
         const eventType = Object.keys(message?.event)[0];
-        
+
         // Handle FHIR tool results
         if (eventType === "toolResult") {
             try {
@@ -138,7 +159,7 @@ class S2sChatBot extends React.Component {
             this.eventDisplayRef.current.displayEvent(message, "in");
             return;
         }
-        
+
         const role = message.event[eventType]["role"];
         const content = message.event[eventType]["content"];
         const contentId = message.event[eventType].contentId;
@@ -147,7 +168,7 @@ class S2sChatBot extends React.Component {
         var chatMessages = this.state.chatMessages;
 
         switch(eventType) {
-            case "textOutput": 
+            case "textOutput":
                 // Detect interruption
                 if (role === "ASSISTANT" && content.startsWith("{")) {
                     const evt = JSON.parse(content);
@@ -182,7 +203,7 @@ class S2sChatBot extends React.Component {
                     }
 
                     chatMessages[contentId] =  {
-                        "content": "", 
+                        "content": "",
                         "role": role,
                         "generationStage": generationStage,
                         "raw": [],
@@ -203,7 +224,7 @@ class S2sChatBot extends React.Component {
                 }
                 break;
             case "usageEvent":
-                if (this.meterRef.current) { 
+                if (this.meterRef.current) {
                     this.meterRef.current.updateMeter(message);
                     if (this.state.showUsage === false) {
                         this.setState({showUsage: true});
@@ -220,22 +241,22 @@ class S2sChatBot extends React.Component {
 
     handlePatientVisualization(message) {
         const eventType = Object.keys(message?.event)[0];
-        
+
         if (eventType === "patientDashboard") {
             const dashboardData = message.event[eventType];
-            
+
             if (dashboardData.dashboard_image) {
                 // Display dashboard image
                 this.displayPatientDashboard(dashboardData.dashboard_image);
             }
-            
+
             if (dashboardData.voice_summary) {
                 // Add voice summary to chat
                 this.addVoiceSummaryToChat(dashboardData.voice_summary);
             }
         }
     }
-    
+
     displayPatientDashboard(base64Image) {
         // Create image element and display in the Data View section
         const dataViewContainer = document.querySelector('.data-view-container');
@@ -243,26 +264,26 @@ class S2sChatBot extends React.Component {
             dataViewContainer.innerHTML = `
                 <div class="patient-dashboard">
                     <h3>Patient Dashboard</h3>
-                    <img src="data:image/png;base64,${base64Image}" 
-                         alt="Patient Dashboard" 
+                    <img src="data:image/png;base64,${base64Image}"
+                         alt="Patient Dashboard"
                          style="max-width: 100%; height: auto;" />
                 </div>
             `;
         }
     }
-    
+
     addVoiceSummaryToChat(voiceSummary) {
         // Add to chat messages for voice synthesis
         const contentId = crypto.randomUUID();
         const chatMessages = this.state.chatMessages;
-        
+
         chatMessages[contentId] = {
             "content": voiceSummary,
             "role": "ASSISTANT",
             "type": "patient_summary",
             "raw": []
         };
-        
+
         this.setState({chatMessages: chatMessages});
     }
 
@@ -272,24 +293,24 @@ class S2sChatBot extends React.Component {
             this.endSession();
             this.cancelAudio();
             if (this.meterRef.current) this.meterRef.current.stop();
-            this.audioPlayer.start(); 
+            this.audioPlayer.start();
         }
         else {
             // Start session
             this.setState({
-                chatMessages:{}, 
-                events: [], 
+                chatMessages:{},
+                events: [],
             });
             if (this.eventDisplayRef.current) this.eventDisplayRef.current.cleanup();
             if (this.meterRef.current) this.meterRef.current.start();
-            
+
             // Init S2sSessionManager
             try {
                 if (this.socket === null || this.socket.readyState !== WebSocket.OPEN) {
                     this.connectWebSocket();
                 }
 
-                // Start microphone 
+                // Start microphone
                 this.startMicrophone();
             } catch (error) {
                 console.error('Error accessing microphone: ', error);
@@ -315,7 +336,7 @@ class S2sChatBot extends React.Component {
             this.socket = new WebSocket(ws_url);
             this.socket.onopen = () => {
                 console.log("WebSocket connected!");
-    
+
                 // Start session events
                 this.sendEvent(S2sEvent.sessionStart());
 
@@ -340,7 +361,7 @@ class S2sChatBot extends React.Component {
                         this.sendEvent(S2sEvent.textInput(promptName, chatHistoryContentName, chat.content));
                         this.sendEvent(S2sEvent.contentEnd(promptName, chatHistoryContentName));
                     }
-                    
+
                 }
 
                 this.sendEvent(S2sEvent.contentStartAudio(promptName, audioContentName));
@@ -351,13 +372,13 @@ class S2sChatBot extends React.Component {
                 const event = JSON.parse(message.data);
                 this.handleIncomingMessage(event);
             };
-        
+
             // Handle errors
             this.socket.onerror = (error) => {
                 this.setState({alert: "WebSocket Error: ", error});
                 console.error("WebSocket Error: ", error);
             };
-        
+
             // Handle connection close
             this.socket.onclose = () => {
                 console.log("WebSocket Disconnected");
@@ -366,11 +387,11 @@ class S2sChatBot extends React.Component {
             };
         }
     }
-      
+
     async startMicrophone() {
         try {
             console.log('Starting microphone with enhanced settings...');
-            
+
             // Request microphone access with higher quality settings
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
@@ -382,56 +403,56 @@ class S2sChatBot extends React.Component {
                     sampleSize: 16               // 16-bit samples
                 }
             });
-            
+
             console.log('Microphone access granted, initializing audio context...');
-            
+
             // Use a larger buffer size for stability (2048 instead of 512)
             const bufferSize = 2048;
             const targetSampleRate = 16000;
-            
+
             // Initialize audio context with improved latency settings
             const audioContext = new (window.AudioContext || window.webkitAudioContext)({
                 latencyHint: 'interactive',
                 sampleRate: 44100 // Match microphone sample rate
             });
-            
+
             console.log(`Audio context created: ${audioContext.sampleRate}Hz`);
-            
+
             // Create analyzer to detect voice activity
             const analyser = audioContext.createAnalyser();
             analyser.fftSize = 1024;
             analyser.smoothingTimeConstant = 0.8;
-            
+
             // Create processing chain
             const source = audioContext.createMediaStreamSource(stream);
             const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
-            
+
             // Connect audio nodes
             source.connect(analyser);
             analyser.connect(processor);
             processor.connect(audioContext.destination);
-            
+
             // Variables to track silence detection
             let silenceStart = null;
             let isSpeaking = false;
             const silenceThreshold = 0.01; // Adjust based on testing
             const silenceTimeout = 1500;   // 1.5 seconds of silence before we consider speech ended
-            
+
             // Audio processing function
             processor.onaudioprocess = async (e) => {
                 if (!this.state.sessionStarted) return;
-                
+
                 // Get audio data
                 const inputBuffer = e.inputBuffer;
                 const inputData = inputBuffer.getChannelData(0);
-                
+
                 // Measure audio level
                 let sum = 0;
                 for (let i = 0; i < inputData.length; i++) {
                     sum += Math.abs(inputData[i]);
                 }
                 const average = sum / inputData.length;
-                
+
                 // Voice activity detection
                 if (average > silenceThreshold) {
                     // Speech detected
@@ -446,7 +467,7 @@ class S2sChatBot extends React.Component {
                         isSpeaking = false;
                     }
                 }
-                
+
                 try {
                     // Create resampling context
                     const offlineContext = new OfflineAudioContext({
@@ -454,35 +475,35 @@ class S2sChatBot extends React.Component {
                         length: Math.ceil(inputBuffer.duration * targetSampleRate),
                         sampleRate: targetSampleRate
                     });
-                    
+
                     // Prepare buffer for resampling
                     const offlineSource = offlineContext.createBufferSource();
                     const monoBuffer = offlineContext.createBuffer(1, inputBuffer.length, inputBuffer.sampleRate);
                     monoBuffer.copyToChannel(inputData, 0);
-                    
+
                     offlineSource.buffer = monoBuffer;
                     offlineSource.connect(offlineContext.destination);
                     offlineSource.start(0);
-                    
+
                     // Perform resampling
                     const renderedBuffer = await offlineContext.startRendering();
                     const resampled = renderedBuffer.getChannelData(0);
-                    
+
                     // Convert to Int16 PCM (16-bit)
                     const buffer = new ArrayBuffer(resampled.length * 2);
                     const pcmData = new DataView(buffer);
-                    
+
                     for (let i = 0; i < resampled.length; i++) {
                         const s = Math.max(-1, Math.min(1, resampled[i]));
                         pcmData.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
                     }
-                    
+
                     // Convert to base64 for transmission
                     let binary = '';
                     for (let i = 0; i < pcmData.byteLength; i++) {
                         binary += String.fromCharCode(pcmData.getUint8(i));
                     }
-                    
+
                     const currentState = this.stateRef.current;
                     if (currentState && currentState.promptName && currentState.audioContentName) {
                         const event = S2sEvent.audioInput(
@@ -496,7 +517,7 @@ class S2sChatBot extends React.Component {
                     console.error('Error processing audio chunk:', err);
                 }
             };
-            
+
             // Set up cleanup handler
             window.audioCleanup = () => {
                 console.log('Cleaning up audio resources...');
@@ -506,28 +527,28 @@ class S2sChatBot extends React.Component {
                 stream.getTracks().forEach(track => track.stop());
                 audioContext.close().catch(e => console.error('Error closing audio context:', e));
             };
-            
+
             // For backup recording in case the processor misses something
             this.mediaRecorder = new MediaRecorder(stream, {
                 mimeType: 'audio/webm;codecs=opus',
                 audioBitsPerSecond: 128000
             });
-            
+
             this.mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
                     this.state.audioChunks.push(event.data);
                 }
             };
-            
+
             // Set data available event timing to 1 second for regular updates
             this.mediaRecorder.start(1000);
-            
+
             this.setState({ sessionStarted: true });
             console.log('Enhanced microphone recording started successfully');
-            
+
         } catch (error) {
             console.error('Failed to initialize microphone:', error);
-            this.setState({ 
+            this.setState({
                 alert: `Microphone error: ${error.message || 'Unable to access microphone'}`,
                 sessionStarted: false
             });
@@ -551,50 +572,50 @@ class S2sChatBot extends React.Component {
         }
         // Legacy fallback handling for individual resource arrays/bundles
         let patientData = { ...this.state.patientData };
-        
+
         // Process patient demographics
         if (Array.isArray(result) && result.length > 0 && result[0].resourceType === "Patient") {
             patientData.demographics = result[0];
             console.log("Patient demographics loaded:", patientData.demographics);
         }
-        
+
         // Process patient encounters
         if (Array.isArray(result) && result.length > 0 && result[0].resourceType === "Encounter") {
             patientData.encounters = result;
             console.log(`Loaded ${result.length} encounters`);
         }
-        
+
         // Process medications
         if (Array.isArray(result) && result.length > 0 && result[0].resourceType === "MedicationRequest") {
             patientData.medications = result;
             console.log(`Loaded ${result.length} medications`);
         }
-        
+
         // Process observations (vital signs, lab results)
         if (Array.isArray(result) && result.length > 0 && result[0].resourceType === "Observation") {
             patientData.observations = result;
             console.log(`Loaded ${result.length} observations`);
         }
-        
+
         // Process lab results
         if (Array.isArray(result) && result.length > 0 && result[0].resourceType === "Observation" && result[0].category.coding[0].code === "laboratory") {
             patientData.lab_results = result;
             console.log(`Loaded ${result.length} lab results`);
         }
-        
+
         // Process conditions
         if (Array.isArray(result) && result.length > 0 && result[0].resourceType === "Condition") {
             patientData.conditions = result;
             console.log(`Loaded ${result.length} conditions`);
         }
-        
+
         // Handle raw FHIR Bundle responses
         if (!Array.isArray(result) && result.resourceType === "Bundle" && Array.isArray(result.entry)) {
             console.log("Processing FHIR Bundle response");
             result.entry.forEach(entry => {
                 const resource = entry.resource;
                 if (!resource) return;
-                
+
                 switch(resource.resourceType) {
                     case "Patient":
                         patientData.demographics = resource;
@@ -617,11 +638,11 @@ class S2sChatBot extends React.Component {
                 }
             });
         }
-        
+
         // Update state with new data
         this.setState((prev) => ({ patientData: deepMerge({ ...prev.patientData }, patientData) }));
     }
-    
+
     // Format patient data for display
     renderPatientData() {
         const { patientData, differentialDiagnosis } = this.state;
@@ -807,7 +828,7 @@ class S2sChatBot extends React.Component {
             </table>
         );
     }
-    
+
     endSession() {
         if (this.socket) {
             // Close microphone
@@ -824,10 +845,81 @@ class S2sChatBot extends React.Component {
             // Close websocket
             this.socket.close();
 
-            this.setState({sessionStarted: false});
+                        this.setState({sessionStarted: false});
         }
-  
+
     }
+
+    // Amazon Transcribe handlers
+    handleTranscribeToggle = async () => {
+        if (this.state.transcribeStarted) {
+            this.stopTranscribe();
+        } else {
+            await this.startTranscribe();
+        }
+    }
+
+    startTranscribe = async () => {
+        try {
+            console.log(`Starting Amazon Transcribe (${this.state.transcribeMode} mode)...`);
+            this.setState({
+                transcribeStarted: true,
+                transcribeAlert: null,
+                transcribeText: ""
+            });
+
+            const language = 'en-US'; // Default language, could be configurable
+
+            const transcriptionCallback = (transcribedText) => {
+                this.setState(prevState => ({
+                    transcribeText: prevState.transcribeText + transcribedText
+                }));
+            };
+
+            let success = false;
+
+            if (this.state.transcribeMode === 'medical') {
+                if (!isMedicalTranscriptionAvailable()) {
+                    throw new Error('Medical transcription is not available in this configuration');
+                }
+                success = await startMedicalRecording(language, transcriptionCallback, this.state.medicalSpecialty);
+            } else {
+                success = await startRecording(language, transcriptionCallback, false);
+            }
+
+            if (success) {
+                console.log(`Amazon Transcribe ${this.state.transcribeMode} mode started successfully`);
+            } else {
+                throw new Error('Failed to start transcription service');
+            }
+        } catch (error) {
+            console.error('Failed to start Amazon Transcribe:', error);
+            this.setState({
+                transcribeAlert: `Transcribe error: ${error.message || 'Unable to start transcription'}`,
+                transcribeStarted: false
+            });
+        }
+    }
+
+    stopTranscribe = async () => {
+        try {
+            console.log('Stopping Amazon Transcribe...');
+            await stopRecording();
+            this.setState({ transcribeStarted: false });
+            console.log('Amazon Transcribe stopped successfully');
+        } catch (error) {
+            console.error('Error stopping Amazon Transcribe:', error);
+            this.setState({
+                transcribeAlert: `Error stopping transcribe: ${error.message}`,
+                transcribeStarted: false
+            });
+        }
+    }
+
+    clearTranscribeText = () => {
+        this.setState({ transcribeText: "" });
+    }
+
     render() {
         return (
             <div className="s2s">
@@ -835,12 +927,22 @@ class S2sChatBot extends React.Component {
                 <div><Alert statusIconAriaLabel="Warning" type="warning">
                 {this.state.alert}
                 </Alert><br/></div>:<div/>}
+                {this.state.transcribeAlert !== null && this.state.transcribeAlert.length > 0?
+                <div><Alert statusIconAriaLabel="Warning" type="warning">
+                {this.state.transcribeAlert}
+                </Alert><br/></div>:<div/>}
                 <div className='top'>
                     <div className='action'>
-                        <Button variant='primary' onClick={this.handleSessionChange}>
-                            <Icon name={this.state.sessionStarted?"microphone-off":"microphone"} />&nbsp;&nbsp;
-                            {this.state.sessionStarted?"End Conversation":"Start Conversation"}
-                        </Button>
+                        <SpaceBetween direction="horizontal" size="s">
+                            <Button variant='primary' onClick={this.handleSessionChange}>
+                                <Icon name={this.state.sessionStarted?"microphone-off":"microphone"} />&nbsp;&nbsp;
+                                {this.state.sessionStarted?"End Conversation":"Start Conversation"}
+                            </Button>
+                            <Button variant='normal' onClick={this.handleTranscribeToggle}>
+                                <Icon name={this.state.transcribeStarted?"microphone-off":"microphone"} />&nbsp;&nbsp;
+                                {this.state.transcribeStarted?"Stop Transcribe":"Start Transcribe"}
+                            </Button>
+                        </SpaceBetween>
                         <div className='chathistory'>
                             <Checkbox checked={this.state.includeChatHistory} onChange={({ detail }) => this.setState({includeChatHistory: detail.checked})}>Include chat history</Checkbox>
                             <div className='desc'>You can view sample chat history in the settings.</div>
@@ -848,14 +950,14 @@ class S2sChatBot extends React.Component {
                     </div>
                     {this.state.showUsage && <Meter ref={this.meterRef}/>}
                     <div className='setting'>
-                        <Button onClick={()=> 
+                        <Button onClick={()=>
                             this.setState({
-                                showConfig: true, 
+                                showConfig: true,
                             })
                         }>
                             <Icon name="settings"/>
                         </Button>
-                        
+
                     </div>
                 </div>
                 <br/>
@@ -871,9 +973,9 @@ class S2sChatBot extends React.Component {
                              const msg = this.state.chatMessages[key];
                              //if (msg.stopReason === "END_TURN" || msg.role === "USER")
                              return <div className='item'>
-                                 <div className={msg.role === "USER"?"user":"bot"} onClick={()=> 
+                                 <div className={msg.role === "USER"?"user":"bot"} onClick={()=>
                                          this.setState({
-                                             showEventJson: true, 
+                                             showEventJson: true,
                                              selectedEvent: {events:msg.raw}
                                          })
                                      }>
@@ -890,6 +992,74 @@ class S2sChatBot extends React.Component {
                         <Header variant="h2">Patient Data View</Header>
                     }>
                         {this.renderPatientData()}
+                    </Container>
+                                        <Container header={
+                        <Header variant="h2" actions={
+                            <SpaceBetween direction="horizontal" size="s">
+                                <Select
+                                    selectedOption={{
+                                        label: this.state.transcribeMode === 'medical' ? 'Medical Transcription' : 'Standard Transcription',
+                                        value: this.state.transcribeMode
+                                    }}
+                                    onChange={({ detail }) => {
+                                        this.setState({ transcribeMode: detail.selectedOption.value });
+                                    }}
+                                    options={[
+                                        { label: "Standard Transcription", value: "standard" },
+                                        { label: "Medical Transcription", value: "medical" }
+                                    ]}
+                                    disabled={this.state.transcribeStarted}
+                                />
+                                {this.state.transcribeMode === 'medical' && (
+                                    <Select
+                                        selectedOption={{
+                                            label: this.state.medicalSpecialty,
+                                            value: this.state.medicalSpecialty
+                                        }}
+                                        onChange={({ detail }) => {
+                                            this.setState({ medicalSpecialty: detail.selectedOption.value });
+                                        }}
+                                        options={getMedicalSpecialties().map(specialty => ({
+                                            label: specialty,
+                                            value: specialty
+                                        }))}
+                                        disabled={this.state.transcribeStarted}
+                                    />
+                                )}
+                                <Button onClick={this.clearTranscribeText} disabled={!this.state.transcribeText}>
+                                    Clear Text
+                                </Button>
+                            </SpaceBetween>
+                        }>Amazon Transcribe Output</Header>
+                    }>
+                        <div className="transcribe-container">
+                            <div className="transcribe-status">
+                                <div className={`transcribe-status-indicator ${this.state.transcribeStarted ? 'active' : ''}`}></div>
+                                <span>
+                                    {this.state.transcribeStarted ?
+                                        `Recording - ${this.state.transcribeMode === 'medical' ? 'Medical' : 'Standard'} transcription listening for speech...` :
+                                        `Transcribe is stopped - ${this.state.transcribeMode === 'medical' ? 'Medical' : 'Standard'} mode selected`
+                                    }
+                                    {this.state.transcribeMode === 'medical' && this.state.transcribeStarted &&
+                                        ` (${this.state.medicalSpecialty})`
+                                    }
+                                </span>
+                            </div>
+                            <div className={`transcribe-output ${this.state.transcribeStarted ? 'listening' : ''} ${!this.state.transcribeText ? 'empty' : ''}`}>
+                                {this.state.transcribeText ||
+                                    (this.state.transcribeStarted ?
+                                        "Listening... Start speaking to see transcription appear here in real-time." :
+                                        "Amazon Transcribe will display your speech-to-text conversion here. Click 'Start Transcribe' to begin."
+                                    )
+                                }
+                            </div>
+                            {this.state.transcribeText && (
+                                <div className="transcribe-metadata">
+                                    <span>Characters: {this.state.transcribeText.length}</span>
+                                    <span>Words: {this.state.transcribeText.trim().split(/\s+/).length}</span>
+                                </div>
+                            )}
+                        </div>
                     </Container>
                     <Container header={
                         <Header variant="h2">Events</Header>
@@ -933,7 +1103,7 @@ class S2sChatBot extends React.Component {
                     </pre>
                     </div>
                 </Modal>
-                <Modal  
+                <Modal
                     onDismiss={() => this.setState({showConfig: false})}
                     visible={this.state.showConfig}
                     header="Nova S2S settings"

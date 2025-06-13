@@ -1,0 +1,76 @@
+.transcribe-container {
+    margin-top: 10px;
+}
+
+.transcribe-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.transcribe-output {
+    min-height: 200px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    white-space: pre-wrap;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    overflow-y: auto;
+    max-height: 400px;
+}
+
+.transcribe-output.listening {
+    background-color: #e8f5e8;
+    border-color: #28a745;
+}
+
+.transcribe-output.empty {
+    color: #6c757d;
+    font-style: italic;
+}
+
+.transcribe-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.transcribe-status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #dc3545;
+}
+
+.transcribe-status-indicator.active {
+    background-color: #28a745;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.2);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.transcribe-metadata {
+    font-size: 12px;
+    color: #6c757d;
+    margin-top: 10px;
+    display: flex;
+    justify-content: space-between;
+}
