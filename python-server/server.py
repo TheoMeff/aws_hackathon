@@ -9,7 +9,7 @@ import http.server
 import threading
 import os
 from http import HTTPStatus
-from integration.fhir_mcp_client import FhirMcpClient  # FHIR MCP agent
+from integration.mimic_fhir_mcp_client import MimicFhirMcpClient  # FHIR MCP agent
 from integration.mimic_fhir_agent import MimicFhirAgent  # MIMIC FHIR conversational agent
 
 # Configure logging
@@ -112,10 +112,10 @@ async def websocket_handler(websocket):
                         """Handle WebSocket connections from the frontend."""
                         # Create a new stream manager for this connection
                         stream_manager = S2sSessionManager(model_id='amazon.nova-sonic-v1:0', region='us-east-1', mcp_loc_client=MCP_CLIENT, strands_agent=STRANDS_AGENT, fhir_agent=FHIR_AGENT, mimic_fhir_agent=MIMIC_FHIR_AGENT)
-                        
+
                         # Initialize the Bedrock stream
                         await stream_manager.initialize_stream()
-                        
+
                         # Start a task to forward responses from Bedrock to the WebSocket
                         forward_task = asyncio.create_task(forward_responses(websocket, stream_manager))
 
@@ -124,21 +124,21 @@ async def websocket_handler(websocket):
                             debug_print(message[0:180])
                         else:
                             debug_print(message)
-                            
+
                     if event_type:
                         # Store prompt name and content names if provided
                         if event_type == 'promptStart':
                             stream_manager.prompt_name = data['event']['promptStart']['promptName']
                         elif event_type == 'contentStart' and data['event']['contentStart'].get('type') == 'AUDIO':
                             stream_manager.audio_content_name = data['event']['contentStart']['contentName']
-                        
+
                         # Handle audio input separately
                         if event_type == 'audioInput':
                             # Extract audio data
                             prompt_name = data['event']['audioInput']['promptName']
                             content_name = data['event']['audioInput']['contentName']
                             audio_base64 = data['event']['audioInput']['content']
-                            
+
                             # Add to the audio queue
                             stream_manager.add_audio_chunk(prompt_name, content_name, audio_base64)
                         else:
@@ -169,7 +169,7 @@ async def forward_responses(websocket, stream_manager):
         while True:
             # Get next response from the output queue
             response = await stream_manager.output_queue.get()
-            
+
             # Send to WebSocket
             try:
                 event = json.dumps(response)
@@ -194,11 +194,11 @@ async def main(host, port, health_port, enable_mcp=False, enable_strands_agent=F
             start_health_check_server(host, health_port)
         except Exception as ex:
             print("Failed to start health check endpoint",ex)
-    
+
     # Init MCP clients
     if enable_mcp_fhir:
         print("FHIR MCP enabled")
-        MCP_CLIENT = FhirMcpClient()
+        MCP_CLIENT = MimicFhirMcpClient()
         await MCP_CLIENT.connect_to_server()
     if enable_mimic_fhir:
         print("MIMIC FHIR agent enabled")
@@ -210,7 +210,7 @@ async def main(host, port, health_port, enable_mcp=False, enable_strands_agent=F
         # Start WebSocket server
         async with websockets.serve(websocket_handler, host, port):
             print(f"WebSocket server started at host:{host}, port:{port}")
-            
+
             # Keep the server running forever
             await asyncio.Future()
     except Exception as ex:
@@ -218,7 +218,7 @@ async def main(host, port, health_port, enable_mcp=False, enable_strands_agent=F
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='Nova S2S WebSocket Server')
     parser.add_argument('--agent', type=str, help='Agent integration "mcp", "strands", "mcp_fhir", or "fhir".')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')

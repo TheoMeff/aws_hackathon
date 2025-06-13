@@ -8,15 +8,22 @@ import Meter from './components/meter';
 import S2sEventDisplay from './components/eventDisplay';
 import { base64ToFloat32Array } from './helper/audioHelper';
 import AudioPlayer from './helper/audioPlayer';
-// Temporarily use mock client for testing without AWS credentials
-// Change back to './helper/transcribeClient' when AWS is configured
+// Proxy transcribe client using boto3 credentials via backend
 import {
     startRecording,
     stopRecording,
     startMedicalRecording,
     getMedicalSpecialties,
-    isMedicalTranscriptionAvailable
-} from './helper/transcribeClient.mock';
+    isMedicalTranscriptionAvailable,
+    isProxyConnected,
+    getProxyConfig
+} from './helper/transcribeClient.proxy';
+
+// Enhanced multi-channel functions (not available in proxy mode yet)
+const startMultiChannelRecording = undefined;
+const isMultiChannelSupported = () => false;
+const getSpeakerHistory = () => [];
+const getCurrentSpeaker = () => null;
 
 // Deep merge utility for patientData
 function deepMerge(target = {}, source = {}) {
@@ -85,6 +92,15 @@ class S2sChatBot extends React.Component {
             transcribeAlert: null,
             transcribeMode: 'standard', // 'standard' or 'medical'
             medicalSpecialty: 'PRIMARYCARE',
+
+            // Enhanced multi-channel transcribe state
+            enableMultiChannel: false,
+            enableStereoInput: false,
+            transcribeMessages: [], // Array of speaker-tagged messages
+            currentSpeaker: null,
+            speakerHistory: [],
+            channelActivity: { clinician: false, patient: false },
+            audioLevels: { clinician: 0, patient: 0 },
 
             // S2S config items
             configAudioInput: null,
@@ -871,9 +887,33 @@ class S2sChatBot extends React.Component {
             const language = 'en-US'; // Default language, could be configurable
 
             const transcriptionCallback = (transcribedText) => {
-                this.setState(prevState => ({
-                    transcribeText: prevState.transcribeText + transcribedText
-                }));
+                console.log(`🎤 Transcription callback received: "${transcribedText}"`);
+
+                // Only add to chat if we have meaningful text
+                if (transcribedText && transcribedText.trim().length > 0) {
+                    // Add transcribed text to chat messages as USER input
+                    const contentId = crypto.randomUUID();
+                    const chatMessages = this.state.chatMessages;
+
+                    chatMessages[contentId] = {
+                        "content": transcribedText.trim(),
+                        "role": "USER",
+                        "type": "transcription",
+                        "source": this.state.transcribeMode,
+                        "specialty": this.state.transcribeMode === 'medical' ? this.state.medicalSpecialty : null,
+                        "timestamp": new Date().toISOString(),
+                        "raw": []
+                    };
+
+                    this.setState({
+                        chatMessages: chatMessages,
+                        transcribeText: this.state.transcribeText + transcribedText
+                    });
+
+                    console.log(`✅ Added transcription to chat: "${transcribedText.trim()}"`);
+                } else {
+                    console.log(`⚠️ Skipping empty transcription: "${transcribedText}"`);
+                }
             };
 
             let success = false;
@@ -972,7 +1012,7 @@ class S2sChatBot extends React.Component {
                             .map((key,index) => {
                              const msg = this.state.chatMessages[key];
                              //if (msg.stopReason === "END_TURN" || msg.role === "USER")
-                             return <div className='item'>
+                             return <div className='item' key={key}>
                                  <div className={msg.role === "USER"?"user":"bot"} onClick={()=>
                                          this.setState({
                                              showEventJson: true,
@@ -982,6 +1022,16 @@ class S2sChatBot extends React.Component {
                                      <Icon name={msg.role === "USER"?"user-profile":"gen-ai"} />&nbsp;&nbsp;
                                      {msg.content}
                                      {msg.role === "ASSISTANT" && msg.generationStage? ` [${msg.generationStage}]`:""}
+                                     {msg.type === "transcription" && (
+                                         <span style={{
+                                             fontSize: '0.8em',
+                                             color: '#666',
+                                             marginLeft: '8px',
+                                             fontStyle: 'italic'
+                                         }}>
+                                             [🎤 {msg.source === 'medical' ? `Medical - ${msg.specialty}` : 'Standard'} Transcription]
+                                         </span>
+                                     )}
                                  </div>
                              </div>
                         })}
