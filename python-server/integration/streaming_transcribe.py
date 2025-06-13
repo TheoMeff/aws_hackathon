@@ -78,6 +78,10 @@ class TranscribeEventHandler(TranscriptResultStreamHandler):
                 end_time = getattr(result, 'end_time', 0.0)
                 is_partial = getattr(result, 'is_partial', False)
 
+                # Skip partial results; only emit final transcripts
+                if is_partial:
+                    continue
+
                 # Create transcript line
                 line = TranscriptLine(
                     line_id=f"transcript_{datetime.now().timestamp()}",
@@ -103,6 +107,7 @@ class TranscribeEventHandler(TranscriptResultStreamHandler):
         if speaker_label not in self.speaker_map:
             # Simple mapping - first speaker is doctor, second is patient
             speaker_count = len(self.speaker_map)
+            silence_chunk = b'\x00' * 320  # 20 ms of silence at 16 kHz PCM
             if speaker_count == 0:
                 friendly_name = "doctor"
             elif speaker_count == 1:
@@ -149,6 +154,7 @@ class TranscribeStreamer:
         self._stopped = asyncio.Event()
         self._client = None
         self._stream = None
+        self._last_chunk_ts = datetime.now()
 
         # Audio processing settings
         self.chunk_size = 1024 * 4  # 4KB chunks
