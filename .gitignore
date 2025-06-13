@@ -4,7 +4,7 @@ react-client/node_modules/.cache/
 
 # Python venv
 python-server/.venv/
-.env
+*.env
 
 # Notebooks
 *.ipynb
